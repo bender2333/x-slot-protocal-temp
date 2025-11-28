@@ -1,176 +1,119 @@
-# X-Slot 无线互联协议完整工程
-# 目录结构：
-# xslot/
-# ├── CMakeLists.txt              (根CMake文件)
-# ├── README.md                   (工程说明)
-# ├── src/                        (源代码目录)
-# │   ├── CMakeLists.txt
-# │   ├── core/                   (核心协议层)
-# │   │   ├── xslot_protocol.h
-# │   │   ├── xslot_protocol.cpp
-# │   │   ├── xslot_codec.h
-# │   │   ├── xslot_codec.cpp
-# │   │   └── xslot_manager.cpp
-# │   ├── transport/              (传输层)
-# │   │   ├── xslot_transport.h
-# │   │   ├── xslot_at_transport.h
-# │   │   ├── xslot_at_transport.cpp
-# │   │   ├── xslot_uart_transport.h
-# │   │   └── xslot_uart_transport.cpp
-# │   ├── bacnet/                 (BACnet序列化)
-# │   │   ├── xslot_bacnet.h
-# │   │   └── xslot_bacnet.cpp
-# │   ├── hal/                    (硬件抽象层)
-# │   │   ├── xslot_hal.h
-# │   │   ├── xslot_hal_win32.cpp
-# │   │   └── xslot_hal_freertos.cpp
-# │   └── xslot_c_api.cpp         (C接口导出)
-# ├── include/                    (公共头文件)
-# │   ├── xslot.h                 (C接口)
-# │   └── xslot.hpp               (C++接口)
-# ├── demo/                       (示例程序)
-# │   ├── CMakeLists.txt
-# │   ├── demo_basic.cpp
-# │   ├── demo_gateway.cpp
-# │   └── demo_edge_node.cpp
-# ├── doc/                        (文档)
-# │   ├── architecture.md
-# │   ├── protocol_spec.md
-# │   └── api_reference.md
-# └── test/                       (测试代码)
-#     └── test_protocol.cpp
-
-# ============================================================================
-# 根CMakeLists.txt
-# ============================================================================
-
+# =============================================================================
+# X-Slot Protocol - CMake 构建配置
+# =============================================================================
 cmake_minimum_required(VERSION 3.15)
-project(XSlotProtocol VERSION 1.0.0 LANGUAGES C CXX)
+project(xslot VERSION 1.0.0 LANGUAGES C CXX)
 
-# 设置C++标准
-set(CMAKE_CXX_STANDARD 14)
+# C++ 标准
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD 11)
 
 # 编译选项
-option(XSLOT_BUILD_SHARED "Build shared library" OFF)
-option(XSLOT_BUILD_DEMO "Build demo applications" ON)
-option(XSLOT_BUILD_TESTS "Build test suite" OFF)
-option(XSLOT_PLATFORM_FREERTOS "Target FreeRTOS platform" OFF)
+if(MSVC)
+    add_compile_options(/W4 /utf-8)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
 
 # 平台检测
 if(WIN32)
-    set(XSLOT_PLATFORM "WIN32")
-elseif(XSLOT_PLATFORM_FREERTOS)
-    set(XSLOT_PLATFORM "FREERTOS")
+    set(XSLOT_PLATFORM "windows")
+elseif(UNIX AND NOT APPLE)
+    set(XSLOT_PLATFORM "linux")
 else()
-    set(XSLOT_PLATFORM "POSIX")
+    set(XSLOT_PLATFORM "unknown")
 endif()
 
-message(STATUS "XSlot Platform: ${XSLOT_PLATFORM}")
+message(STATUS "X-Slot Platform: ${XSLOT_PLATFORM}")
 
-# 包含目录
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+# 选项
+option(XSLOT_BUILD_DEMO "Build demo applications" ON)
+option(XSLOT_BUILD_TEST "Build unit tests" OFF)
+
+# =============================================================================
+# 库目标
+# =============================================================================
+add_library(xslot STATIC
+    # Core
+    src/core/xslot_manager.cpp
+    src/core/xslot_protocol.cpp
+    src/core/message_codec.cpp
+    src/core/node_table.cpp
+    
+    # Transport
+    src/transport/tpmesh_transport.cpp
+    src/transport/tpmesh_at_driver.cpp
+    src/transport/direct_transport.cpp
+    src/transport/null_transport.cpp
+    
+    # BACnet
+    src/bacnet/bacnet_serializer.cpp
+    src/bacnet/bacnet_incremental.cpp
+    
+    # C API
+    src/xslot_c_api.cpp
 )
 
-# 子目录
-add_subdirectory(src)
-
-if(XSLOT_BUILD_DEMO)
-    add_subdirectory(demo)
+# HAL 层 (平台相关)
+if(XSLOT_PLATFORM STREQUAL "windows")
+    target_sources(xslot PRIVATE src/hal/hal_windows.cpp)
+elseif(XSLOT_PLATFORM STREQUAL "linux")
+    target_sources(xslot PRIVATE src/hal/hal_linux.cpp)
 endif()
 
-if(XSLOT_BUILD_TESTS)
-    add_subdirectory(test)
-endif()
-
-# 安装规则
-install(DIRECTORY include/ DESTINATION include)
-install(FILES 
-    ${CMAKE_CURRENT_SOURCE_DIR}/README.md
-    ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE
-    DESTINATION .
+# 头文件路径
+target_include_directories(xslot
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/bacnet
 )
 
-# ============================================================================
-# src/CMakeLists.txt
-# ============================================================================
-
-# 核心源文件
-set(XSLOT_CORE_SOURCES
-    core/xslot_protocol.cpp
-    core/xslot_codec.cpp
-    core/xslot_manager.cpp
-    transport/xslot_at_transport.cpp
-    bacnet/xslot_bacnet.cpp
-    xslot_c_api.cpp
-)
-
-# 平台相关源文件
-if(XSLOT_PLATFORM STREQUAL "WIN32")
-    list(APPEND XSLOT_CORE_SOURCES 
-        hal/xslot_hal_win32.cpp
-        transport/xslot_uart_win32.cpp
-    )
-elseif(XSLOT_PLATFORM STREQUAL "FREERTOS")
-    list(APPEND XSLOT_CORE_SOURCES 
-        hal/xslot_hal_freertos.cpp
-        transport/xslot_uart_freertos.cpp
-    )
-endif()
-
-# 创建库
-if(XSLOT_BUILD_SHARED)
-    add_library(xslot SHARED ${XSLOT_CORE_SOURCES})
-else()
-    add_library(xslot STATIC ${XSLOT_CORE_SOURCES})
-endif()
-
-# 链接库
+# Windows 链接库
 if(WIN32)
     target_link_libraries(xslot PRIVATE ws2_32)
 endif()
 
-# 设置输出目录
-set_target_properties(xslot PROPERTIES
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-)
+# Linux 链接库
+if(UNIX AND NOT APPLE)
+    find_package(Threads REQUIRED)
+    target_link_libraries(xslot PRIVATE Threads::Threads)
+endif()
 
-# 安装库
+# =============================================================================
+# Demo 应用
+# =============================================================================
+if(XSLOT_BUILD_DEMO)
+    add_executable(demo_edge_node demo/demo_edge_node.cpp)
+    target_link_libraries(demo_edge_node PRIVATE xslot)
+    
+    add_executable(demo_hub_node demo/demo_hub_node.cpp)
+    target_link_libraries(demo_hub_node PRIVATE xslot)
+    
+    add_executable(demo_hmi demo/demo_hmi.cpp)
+    target_link_libraries(demo_hmi PRIVATE xslot)
+endif()
+
+# =============================================================================
+# 单元测试
+# =============================================================================
+if(XSLOT_BUILD_TEST)
+    enable_testing()
+    add_subdirectory(test)
+endif()
+
+# =============================================================================
+# 安装配置
+# =============================================================================
 install(TARGETS xslot
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin
 )
 
-# ============================================================================
-# demo/CMakeLists.txt
-# ============================================================================
-
-# 基础通信示例
-add_executable(demo_basic demo_basic.cpp)
-target_link_libraries(demo_basic xslot)
-
-# 网关节点示例
-add_executable(demo_gateway demo_gateway.cpp)
-target_link_libraries(demo_gateway xslot)
-
-# 边缘节点示例
-add_executable(demo_edge_node demo_edge_node.cpp)
-target_link_libraries(demo_edge_node xslot)
-
-# 设置输出目录
-set_target_properties(
-    demo_basic demo_gateway demo_edge_node
-    PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/demo"
+install(DIRECTORY include/xslot
+    DESTINATION include
 )
 
-# 安装示例
-install(TARGETS demo_basic demo_gateway demo_edge_node
-    RUNTIME DESTINATION bin/demo
-)

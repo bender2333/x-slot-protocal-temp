@@ -1,168 +1,142 @@
-// =============================================================================
-// src/transport/tpmesh_at_driver.h - TPMesh AT命令驱动层 (纯AT抽象)
-// =============================================================================
-//
-// 设计原则：
-// 1. 只关心AT命令的收发，不关心业务逻辑
-// 2. 区分"同步响应"和"URC异步事件"
-// 3. 与串口层解耦，与传输层解耦
-// 4. 不追踪发送状态，不维护业务队列
-//
-// =============================================================================
-
+/**
+ * @file tpmesh_at_driver.h
+ * @brief TPMesh AT 驱动层
+ *
+ * 纯 AT 命令抽象，处理同步响应和异步 URC。
+ */
 #ifndef TPMESH_AT_DRIVER_H
 #define TPMESH_AT_DRIVER_H
 
-#include "../hal/xslot_hal.h"
-#include <functional>
-#include <memory>
-#include <mutex>
-#include <string>
-#include <vector>
+#include <stdbool.h>
+#include <stdint.h>
 
-namespace xslot {
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-// =============================================================================
-// URC事件类型枚举
-// =============================================================================
-enum class URCType {
-  NNMI,    // +NNMI:<SRC>,<DEST>,<RSSI>,<LEN>,<DATA>  - 数据接收
-  SEND,    // +SEND:<SN>,<RESULT>                     - 发送状态
-  ROUTE,   // +ROUTE:CREATE/DELETE ADDR[<addr>]       - 路由变化
-  ACK,     // +ACK:<SRC>,<RSSI>,<SN>                  - 送达确认
-  FLOOD,   // +FLOOD:<SRC>,<LEN>,<DATA>               - 泛洪数据
-  BOOT,    // +BOOT                                   - 模块重启
-  READY,   // +READY                                  - AT接口就绪
-  SUSPEND, // +SUSPEND                                - 进入休眠
-  RESUME,  // +RESUME                                 - 退出休眠
-  UNKNOWN  // 未知URC
-};
+/**
+ * @brief URC 类型
+ */
+typedef enum {
+  URC_NNMI,  /**< 数据接收 */
+  URC_SEND,  /**< 发送状态 */
+  URC_ROUTE, /**< 路由变化 */
+  URC_ACK,   /**< 送达确认 */
+  URC_BOOT,  /**< 模组重启 */
+  URC_READY, /**< AT 就绪 */
+} tpmesh_urc_type_t;
 
-// =============================================================================
-// URC事件结构
-// =============================================================================
-struct URCEvent {
-  URCType type;
-  std::string raw_line; // 原始URC字符串
+/**
+ * @brief URC 数据
+ */
+typedef struct {
+  tpmesh_urc_type_t type;
+  uint16_t src_addr;
+  uint16_t dest_addr;
+  int8_t rssi;
+  uint8_t sn;
+  uint8_t data[256];
+  uint16_t data_len;
+  char result[32];
+} tpmesh_urc_t;
 
-  URCEvent() : type(URCType::UNKNOWN) {}
-  URCEvent(URCType t, const std::string &line) : type(t), raw_line(line) {}
-};
+/**
+ * @brief URC 回调
+ */
+typedef void (*tpmesh_urc_cb)(void *ctx, const tpmesh_urc_t *urc);
 
-// =============================================================================
-// TPMesh AT命令驱动器 (纯AT抽象层)
-// =============================================================================
-class TPMeshATDriver {
-public:
-  // URC事件回调类型
-  using URCCallback = std::function<void(const URCEvent &event)>;
+/**
+ * @brief AT 驱动句柄
+ */
+typedef struct tpmesh_at_driver *tpmesh_at_driver_t;
 
-  TPMeshATDriver(const char *port, uint32_t baudrate);
-  ~TPMeshATDriver();
+/**
+ * @brief 创建 AT 驱动
+ * @param port 串口名
+ * @param baudrate 波特率
+ * @return 驱动句柄
+ */
+tpmesh_at_driver_t tpmesh_at_create(const char *port, uint32_t baudrate);
 
-  // 打开/关闭串口
-  bool open();
-  void close();
-  bool isOpen() const;
+/**
+ * @brief 销毁 AT 驱动
+ */
+void tpmesh_at_destroy(tpmesh_at_driver_t drv);
 
-  // -------------------------------------------------------------------------
-  // 同步AT命令 (阻塞等待OK/ERROR)
-  // -------------------------------------------------------------------------
+/**
+ * @brief 启动驱动
+ */
+int tpmesh_at_start(tpmesh_at_driver_t drv);
 
-  // 发送AT命令，等待OK/ERROR，返回响应行
-  // @param cmd: AT命令字符串（不含\r\n）
-  // @param response_lines: 输出参数，存放响应行（不含OK/ERROR）
-  // @param timeout_ms: 超时时间
-  // @return true=成功(OK), false=失败(ERROR或超时)
-  bool sendCommand(const std::string &cmd,
-                   std::vector<std::string> &response_lines,
-                   uint32_t timeout_ms = 2000);
+/**
+ * @brief 停止驱动
+ */
+void tpmesh_at_stop(tpmesh_at_driver_t drv);
 
-  // 便捷方法：发送命令但不关心响应内容
-  bool sendCommand(const std::string &cmd, uint32_t timeout_ms = 2000);
+/**
+ * @brief 设置 URC 回调
+ */
+void tpmesh_at_set_urc_callback(tpmesh_at_driver_t drv, tpmesh_urc_cb cb,
+                                void *ctx);
 
-  // -------------------------------------------------------------------------
-  // URC事件处理
-  // -------------------------------------------------------------------------
+/**
+ * @brief 发送 AT 命令 (同步等待响应)
+ * @param drv 驱动
+ * @param cmd 命令 (不含 AT+ 前缀和 \r\n)
+ * @param timeout_ms 超时时间
+ * @return 0=OK, <0=错误
+ */
+int tpmesh_at_send_cmd(tpmesh_at_driver_t drv, const char *cmd,
+                       uint32_t timeout_ms);
 
-  // 设置URC事件回调（在接收线程中调用）
-  void setURCCallback(URCCallback callback);
+/**
+ * @brief 发送 AT 命令并获取响应
+ * @param drv 驱动
+ * @param cmd 命令
+ * @param response 响应缓冲区
+ * @param resp_size 缓冲区大小
+ * @param timeout_ms 超时时间
+ * @return 响应长度, <0=错误
+ */
+int tpmesh_at_send_cmd_resp(tpmesh_at_driver_t drv, const char *cmd,
+                            char *response, uint16_t resp_size,
+                            uint32_t timeout_ms);
 
-  // -------------------------------------------------------------------------
-  // 常用AT命令封装 (可选，方便上层使用)
-  // -------------------------------------------------------------------------
+/**
+ * @brief 探测模组 (发送 AT 测试)
+ * @return 0=成功, <0=失败
+ */
+int tpmesh_at_probe(tpmesh_at_driver_t drv);
 
-  // 基础命令
-  bool testConnection();                   // AT
-  bool queryVersion(std::string &version); // AT+VER?
-  bool queryESN(std::string &esn);         // AT+ESN?
-  bool reboot();                           // AT+REBOOT
+/**
+ * @brief 配置地址
+ */
+int tpmesh_at_set_addr(tpmesh_at_driver_t drv, uint16_t addr);
 
-  // 配置命令
-  bool configAddress(uint16_t addr, uint16_t group_addr = 0); // AT+ADDR=
-  bool configCell(uint8_t cell_id);                           // AT+CELL=
-  bool configPower(int8_t dbm);                               // AT+PWR=
-  bool configWakeup(uint16_t period_ms);                      // AT+WOR=
-  bool configBaudrate(uint32_t ctrl_bps, uint32_t data_bps);  // AT+BPS=
-  bool configLowPower(uint8_t mode);   // AT+LP= (2=TypeC, 3=TypeD)
-  bool configAwake(uint16_t awake_ms); // AT+AWAKE=
+/**
+ * @brief 配置小区 ID
+ */
+int tpmesh_at_set_cell(tpmesh_at_driver_t drv, uint8_t cell_id);
 
-  // 查询命令
-  bool queryAddress(uint16_t &addr, uint16_t &group_addr, bool &is_hub);
-  bool queryCell(uint8_t &cell_id);
-  bool queryPower(int8_t &dbm);
+/**
+ * @brief 配置发射功率
+ */
+int tpmesh_at_set_power(tpmesh_at_driver_t drv, int8_t power_dbm);
 
-  // 数据发送命令 (立即返回OK，结果通过+SEND: URC异步通知)
-  // @param dest: 目标地址
-  // @param data: 数据
-  // @param len: 数据长度
-  // @param type: 消息类型 (0=UM, 1=AM, 2=FAST, 3=FLOOD)
-  bool sendData(uint16_t dest, const uint8_t *data, size_t len, uint8_t type);
+/**
+ * @brief 发送数据
+ * @param drv 驱动
+ * @param addr 目标地址
+ * @param data 数据
+ * @param len 长度
+ * @param type 消息类型 (0=UM, 1=AM, 2=FAST, 3=FLOOD)
+ * @return 0=成功, <0=失败
+ */
+int tpmesh_at_send_data(tpmesh_at_driver_t drv, uint16_t addr,
+                        const uint8_t *data, uint16_t len, uint8_t type);
 
-private:
-  // 串口
-  std::unique_ptr<hal::SerialPort> serial_;
-  std::string port_;
-  uint32_t baudrate_;
+#ifdef __cplusplus
+}
+#endif
 
-  // 接收线程
-  std::unique_ptr<hal::Thread> rx_thread_;
-  std::atomic<bool> running_;
-
-  // 状态机
-  enum class State {
-    IDLE,            // 空闲，等待命令或URC
-    WAITING_RESPONSE // 等待同步命令的响应
-  };
-  State state_;
-
-  // 同步命令响应缓冲
-  std::vector<std::string> response_buffer_;
-  bool response_ok_; // true=OK, false=ERROR
-  hal::Mutex sync_mutex_;
-  std::condition_variable_any sync_cv_;
-
-  // URC回调
-  URCCallback urc_callback_;
-  hal::Mutex urc_mutex_;
-
-  // 线程函数
-  void rxThreadFunc();
-
-  // 行处理
-  void processLine(const std::string &line);
-
-  // 串口读写
-  bool readLine(std::string &line, uint32_t timeout_ms);
-  bool writeLine(const std::string &cmd);
-
-  // URC识别
-  static URCType identifyURC(const std::string &line);
-
-  // 辅助函数
-  std::string bytesToHex(const uint8_t *data, size_t len);
-};
-
-} // namespace xslot
-
-#endif // TPMESH_AT_DRIVER_H
+#endif /* TPMESH_AT_DRIVER_H */
