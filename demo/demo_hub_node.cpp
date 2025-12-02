@@ -74,6 +74,7 @@ int main(int argc, char *argv[]) {
   config.cell_id = 1;
   config.power_dbm = 20;
   config.uart_baudrate = 115200;
+  config.power_mode = XSLOT_POWER_MODE_NORMAL; /* Hub 默认也是 Type D */
 
   /* 命令行参数: 串口 */
   if (argc > 1) {

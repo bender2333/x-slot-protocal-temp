@@ -124,6 +124,14 @@ int tpmesh_at_set_cell(tpmesh_at_driver_t drv, uint8_t cell_id);
 int tpmesh_at_set_power(tpmesh_at_driver_t drv, int8_t power_dbm);
 
 /**
+ * @brief 配置功耗模式
+ * @param drv 驱动
+ * @param mode 功耗模式 (2=Type C, 3=Type D)
+ * @return 0=成功, <0=失败
+ */
+int tpmesh_at_set_power_mode(tpmesh_at_driver_t drv, uint8_t mode);
+
+/**
  * @brief 发送数据
  * @param drv 驱动
  * @param addr 目标地址

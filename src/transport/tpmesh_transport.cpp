@@ -123,6 +123,11 @@ static int tpmesh_start(void *impl_ptr) {
     tpmesh_at_set_power(impl->at_driver, impl->config.power_dbm);
   }
 
+  if (impl->config.power_mode == XSLOT_POWER_MODE_LOW ||
+      impl->config.power_mode == XSLOT_POWER_MODE_NORMAL) {
+    tpmesh_at_set_power_mode(impl->at_driver, impl->config.power_mode);
+  }
+
   return XSLOT_OK;
 }
 

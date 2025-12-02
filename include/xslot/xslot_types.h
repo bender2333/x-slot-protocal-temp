@@ -70,6 +70,14 @@ typedef enum {
   XSLOT_OBJ_BINARY_VALUE = 5   /**< BV */
 } xslot_object_type_t;
 
+/**
+ * @brief 模组功耗模式
+ */
+typedef enum {
+  XSLOT_POWER_MODE_LOW = 2,   /**< Type C 低功耗模式 (默认) */
+  XSLOT_POWER_MODE_NORMAL = 3 /**< Type D 非低功耗模式 */
+} xslot_power_mode_t;
+
 /* =============================================================================
  * 数据结构
  * =============================================================================
@@ -110,12 +118,13 @@ typedef struct {
 typedef struct {
   uint16_t local_addr;            /**< 本地地址 */
   uint8_t cell_id;                /**< 小区 ID (0-255) */
-  int8_t power_dbm;               /**< 发射功率 (-30~20 dBm) */
+  int8_t power_dbm;               /**< 发射功率 (-30-36 dBm) */
   uint16_t wakeup_period_ms;      /**< 唤醒周期 (ms) */
   uint32_t uart_baudrate;         /**< 串口波特率 (默认 115200) */
   uint32_t heartbeat_interval_ms; /**< 心跳间隔 (建议 30000-60000 ms) */
   uint32_t heartbeat_timeout_ms;  /**< 心跳超时 (ms) */
   char uart_port[64]; /**< 串口设备名 (如 "COM3" 或 "/dev/ttyUSB0") */
+  xslot_power_mode_t power_mode; /**< 功耗模式 (默认 LOW) */
 } xslot_config_t;
 
 /**

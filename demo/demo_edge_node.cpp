@@ -82,15 +82,16 @@ int main(int argc, char *argv[]) {
   xslot_config_t config = {0};
   config.local_addr = 0xFFFD; /* 边缘节点地址 */
   config.cell_id = 1;
-  config.power_dbm = 20;
+  config.power_dbm = 36;
   config.uart_baudrate = 115200;
+  config.power_mode = XSLOT_POWER_MODE_NORMAL; /* 使用非低功耗模式 (Type D) */
 
   /* 命令行参数: 串口 */
   if (argc > 1) {
     snprintf(config.uart_port, sizeof(config.uart_port), "%s", argv[1]);
   } else {
 #ifdef _WIN32
-    snprintf(config.uart_port, sizeof(config.uart_port), "COM3");
+    snprintf(config.uart_port, sizeof(config.uart_port), "COM23");
 #else
     snprintf(config.uart_port, sizeof(config.uart_port), "/dev/ttyUSB0");
 #endif
@@ -101,6 +102,7 @@ int main(int argc, char *argv[]) {
   /* 初始化 */
   xslot_handle_t handle = xslot_init(&config);
   if (!handle) {
+
     printf("Error: xslot_init failed\n");
     return -1;
   }
