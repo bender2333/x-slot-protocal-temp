@@ -308,7 +308,7 @@ static void on_frame_received(void *ctx, const uint8_t *data, uint16_t len) {
     return;
 
   xslot_frame_t frame;
-  if (xslot_frame_decode(data, len, &frame) == XSLOT_OK) {
+  if (xslot_frame_decode(data, len, &frame) == XSLOT_OK) { 
     /* 检查目标地址 */
     if (frame.to == mgr->config.local_addr ||
         frame.to == XSLOT_ADDR_BROADCAST) {

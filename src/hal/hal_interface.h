@@ -94,6 +94,33 @@ void hal_mutex_lock(void *mutex);
  */
 void hal_mutex_unlock(void *mutex);
 
+/* ============================================================================
+ * 线程函数
+ * ============================================================================
+ */
+
+/**
+ * @brief 线程入口函数类型
+ */
+typedef void (*hal_thread_func_t)(void *arg);
+
+/**
+ * @brief 创建线程
+ * @param name 线程名称
+ * @param func 入口函数
+ * @param arg 参数
+ * @param stack_size 栈大小 (字节)
+ * @param priority 优先级 (0=默认)
+ * @return 线程句柄
+ */
+void *hal_thread_create(const char *name, hal_thread_func_t func, void *arg,
+                        uint32_t stack_size, int priority);
+
+/**
+ * @brief 销毁线程 (等待线程结束)
+ */
+void hal_thread_destroy(void *thread);
+
 #ifdef __cplusplus
 }
 #endif

@@ -80,6 +80,13 @@ void tpmesh_at_set_urc_callback(tpmesh_at_driver_t drv, tpmesh_urc_cb cb,
                                 void *ctx);
 
 /**
+ * @brief 驱动处理循环 (非阻塞)
+ *
+ * 用于读取串口数据并处理 URC。应在主循环或独立线程中周期性调用。
+ */
+void tpmesh_at_process(tpmesh_at_driver_t drv);
+
+/**
  * @brief 发送 AT 命令 (同步等待响应)
  * @param drv 驱动
  * @param cmd 命令 (不含 AT+ 前缀和 \r\n)

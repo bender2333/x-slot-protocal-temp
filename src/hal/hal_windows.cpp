@@ -5,6 +5,7 @@
 #ifdef _WIN32
 
 #include "hal_interface.h"
+#include <process.h>
 #include <stdio.h>
 #include <windows.h>
 
@@ -156,6 +157,57 @@ void hal_mutex_lock(void *mutex) {
 void hal_mutex_unlock(void *mutex) {
   if (mutex) {
     LeaveCriticalSection((CRITICAL_SECTION *)mutex);
+  }
+}
+
+/* ============================================================================
+ * 线程函数
+ * ============================================================================
+ */
+
+struct ThreadParam {
+  hal_thread_func_t func;
+  void *arg;
+};
+
+static unsigned __stdcall thread_entry(void *p) {
+  ThreadParam *tp = (ThreadParam *)p;
+  if (tp && tp->func) {
+    tp->func(tp->arg);
+  }
+  if (tp) {
+    delete tp;
+  }
+  return 0;
+}
+
+void *hal_thread_create(const char *name, hal_thread_func_t func, void *arg,
+                        uint32_t stack_size, int priority) {
+  ThreadParam *tp = new ThreadParam;
+  tp->func = func;
+  tp->arg = arg;
+
+  uintptr_t handle =
+      _beginthreadex(NULL, stack_size, thread_entry, tp, 0, NULL);
+  if (handle == 0) {
+    delete tp;
+    return nullptr;
+  }
+
+  /* 设置优先级 (简单映射) */
+  if (priority > 0) {
+    SetThreadPriority((HANDLE)handle, THREAD_PRIORITY_ABOVE_NORMAL);
+  } else if (priority < 0) {
+    SetThreadPriority((HANDLE)handle, THREAD_PRIORITY_BELOW_NORMAL);
+  }
+
+  return (void *)handle;
+}
+
+void hal_thread_destroy(void *thread) {
+  if (thread) {
+    WaitForSingleObject((HANDLE)thread, INFINITE);
+    CloseHandle((HANDLE)thread);
   }
 }
 

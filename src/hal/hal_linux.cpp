@@ -193,4 +193,64 @@ void hal_mutex_unlock(void *mutex) {
   }
 }
 
+/* ============================================================================
+ * 线程函数
+ * ============================================================================
+ */
+
+struct ThreadParam {
+  hal_thread_func_t func;
+  void *arg;
+};
+
+static void *thread_entry(void *p) {
+  ThreadParam *tp = (ThreadParam *)p;
+  if (tp && tp->func) {
+    tp->func(tp->arg);
+  }
+  if (tp)
+    delete tp;
+  return nullptr;
+}
+
+void *hal_thread_create(const char *name, hal_thread_func_t func, void *arg,
+                        uint32_t stack_size, int priority) {
+  ThreadParam *tp = new ThreadParam;
+  tp->func = func;
+  tp->arg = arg;
+
+  pthread_t *thread = new pthread_t;
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+
+  if (stack_size > 0) {
+    pthread_attr_setstacksize(&attr, stack_size);
+  }
+
+  if (pthread_create(thread, &attr, thread_entry, tp) != 0) {
+    pthread_attr_destroy(&attr);
+    delete thread;
+    delete tp;
+    return nullptr;
+  }
+
+  pthread_attr_destroy(&attr);
+
+  /* 设置线程名 */
+  if (name) {
+#if defined(__linux__) && !defined(__ANDROID__)
+    pthread_setname_np(*thread, name);
+#endif
+  }
+
+  return thread;
+}
+
+void hal_thread_destroy(void *thread) {
+  if (thread) {
+    pthread_join(*(pthread_t *)thread, nullptr);
+    delete (pthread_t *)thread;
+  }
+}
+
 #endif /* __linux__ || __APPLE__ */

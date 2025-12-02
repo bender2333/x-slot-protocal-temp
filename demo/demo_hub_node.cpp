@@ -72,7 +72,7 @@ int main(int argc, char *argv[]) {
   xslot_config_t config = {0};
   config.local_addr = XSLOT_ADDR_HUB; /* 汇聚节点固定地址 0xFFFE */
   config.cell_id = 1;
-  config.power_dbm = 20;
+  config.power_dbm = 36;
   config.uart_baudrate = 115200;
   config.power_mode = XSLOT_POWER_MODE_NORMAL; /* Hub 默认也是 Type D */
 
@@ -81,7 +81,7 @@ int main(int argc, char *argv[]) {
     snprintf(config.uart_port, sizeof(config.uart_port), "%s", argv[1]);
   } else {
 #ifdef _WIN32
-    snprintf(config.uart_port, sizeof(config.uart_port), "COM3");
+    snprintf(config.uart_port, sizeof(config.uart_port), "COM12");
 #else
     snprintf(config.uart_port, sizeof(config.uart_port), "/dev/ttyUSB0");
 #endif

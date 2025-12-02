@@ -85,6 +85,15 @@ int hal_serial_read(void *handle, uint8_t *data, uint16_t max_len,
                     uint32_t timeout_ms);
 uint32_t hal_get_timestamp_ms(void);
 void hal_sleep_ms(uint32_t ms);
+
+typedef void (*hal_thread_func_t)(void *arg);
+void *hal_thread_create(const char *name, hal_thread_func_t func, void *arg,
+                        uint32_t stack_size, int priority);
+void hal_thread_destroy(void *thread);
+void *hal_mutex_create(void);
+void hal_mutex_destroy(void *mutex);
+void hal_mutex_lock(void *mutex);
+void hal_mutex_unlock(void *mutex);
 }
 
 #define AT_BUFFER_SIZE 512
@@ -96,13 +105,25 @@ struct tpmesh_at_driver {
   uint32_t baudrate;
   bool running;
 
+  /* 线程支持 */
+  void *rx_thread;
+  bool stop_thread;
+  void *mutex;
+
   /* URC 回调 */
   tpmesh_urc_cb urc_cb;
   void *urc_ctx;
 
-  /* 接收缓冲区 */
-  char rx_buffer[AT_BUFFER_SIZE];
-  uint16_t rx_len;
+  /* 接收处理缓冲 */
+  char line_buf[AT_BUFFER_SIZE];
+  uint16_t line_idx;
+
+  /* 命令等待状态 */
+  bool awaiting_response;
+  char *resp_buf;
+  uint16_t resp_max_len;
+  volatile bool cmd_complete;
+  int cmd_result;
 };
 
 /**
@@ -121,12 +142,14 @@ static bool parse_urc(const char *line, tpmesh_urc_t *urc) {
       urc->data_len = len;
 
       /* 找到数据部分 */
-      const char *data_start = std::strchr(line + 6, ',');
-      for (int i = 0; i < 4 && data_start; i++) {
-        data_start = std::strchr(data_start + 1, ',');
+      const char *data_start = line + 6;
+      for (int i = 0; i < 4; i++) {
+        data_start = std::strchr(data_start, ',');
+        if (!data_start)
+          break;
+        data_start++;
       }
       if (data_start) {
-        data_start++;
         /* 解析十六进制数据 */
         for (uint16_t i = 0; i < len && data_start[i * 2]; i++) {
           unsigned int byte;
@@ -171,23 +194,6 @@ static bool parse_urc(const char *line, tpmesh_urc_t *urc) {
   return false;
 }
 
-/**
- * @brief 处理接收到的行
- */
-static void process_line(tpmesh_at_driver_t drv, const char *line) {
-  if (!line || !*line)
-    return;
-
-  /* 检查是否为 URC */
-  if (line[0] == '+') {
-    tpmesh_urc_t urc;
-    std::memset(&urc, 0, sizeof(urc));
-    if (parse_urc(line, &urc) && drv->urc_cb) {
-      drv->urc_cb(drv->urc_ctx, &urc);
-    }
-  }
-}
-
 tpmesh_at_driver_t tpmesh_at_create(const char *port, uint32_t baudrate) {
   tpmesh_at_driver_t drv =
       (tpmesh_at_driver_t)std::calloc(1, sizeof(struct tpmesh_at_driver));
@@ -198,6 +204,8 @@ tpmesh_at_driver_t tpmesh_at_create(const char *port, uint32_t baudrate) {
   drv->baudrate = baudrate ? baudrate : 115200;
   drv->running = false;
 
+  drv->mutex = hal_mutex_create();
+
   return drv;
 }
 
@@ -205,7 +213,23 @@ void tpmesh_at_destroy(tpmesh_at_driver_t drv) {
   if (!drv)
     return;
   tpmesh_at_stop(drv);
+
+  if (drv->mutex) {
+    hal_mutex_destroy(drv->mutex);
+  }
+
   std::free(drv);
+}
+
+void tpmesh_at_process(tpmesh_at_driver_t drv);
+
+/* 接收线程入口 */
+static void rx_thread_func(void *arg) {
+  tpmesh_at_driver_t drv = (tpmesh_at_driver_t)arg;
+  while (drv->running && !drv->stop_thread) {
+    tpmesh_at_process(drv);
+    /* tpmesh_at_process 内部有 10ms 阻塞读取，所以这里不需要额外 sleep */
+  }
 }
 
 int tpmesh_at_start(tpmesh_at_driver_t drv) {
@@ -220,7 +244,16 @@ int tpmesh_at_start(tpmesh_at_driver_t drv) {
   }
 
   drv->running = true;
-  drv->rx_len = 0;
+  drv->stop_thread = false;
+  drv->line_idx = 0;
+  drv->awaiting_response = false;
+
+  /* 创建接收线程 */
+  drv->rx_thread = hal_thread_create("tpmesh_rx", rx_thread_func, drv, 4096, 0);
+  if (!drv->rx_thread) {
+    /* 线程创建失败，可能是平台不支持，需要用户手动调用 process */
+    // 这里我们不报错，允许单线程模式，但用户必须调用 process
+  }
 
   return XSLOT_OK;
 }
@@ -228,6 +261,12 @@ int tpmesh_at_start(tpmesh_at_driver_t drv) {
 void tpmesh_at_stop(tpmesh_at_driver_t drv) {
   if (!drv || !drv->running)
     return;
+
+  drv->stop_thread = true;
+  if (drv->rx_thread) {
+    hal_thread_destroy(drv->rx_thread);
+    drv->rx_thread = nullptr;
+  }
 
   drv->running = false;
 
@@ -245,6 +284,79 @@ void tpmesh_at_set_urc_callback(tpmesh_at_driver_t drv, tpmesh_urc_cb cb,
   }
 }
 
+/**
+ * @brief 处理接收到的一行
+ */
+static void process_line(tpmesh_at_driver_t drv, char *line) {
+  /* 移除末尾的 \r \n */
+  size_t len = std::strlen(line);
+  while (len > 0 && (line[len - 1] == '\r' || line[len - 1] == '\n')) {
+    line[--len] = '\0';
+  }
+
+  if (len == 0)
+    return;
+
+  /* 尝试解析 URC */
+  tpmesh_urc_t urc;
+  std::memset(&urc, 0, sizeof(urc));
+  if (parse_urc(line, &urc)) {
+    if (drv->urc_cb) {
+      drv->urc_cb(drv->urc_ctx, &urc);
+    }
+    return; /* URC 处理完毕，不视为命令响应 */
+  }
+
+  /* 如果正在等待响应，检查是否为响应行 */
+  hal_mutex_lock(drv->mutex);
+  if (drv->awaiting_response) {
+    /* 宽松检查 OK，兼容 +AT:OK 或 +ADDR:OK */
+    if (std::strstr(line, "OK") != nullptr) {
+      drv->cmd_result = XSLOT_OK;
+      drv->cmd_complete = true;
+    } else if (std::strstr(line, "ERROR") != nullptr) {
+      drv->cmd_result = XSLOT_ERR_PARAM;
+      drv->cmd_complete = true;
+    } else {
+      /* 累积响应文本 */
+      if (drv->resp_buf && drv->resp_max_len > 0) {
+        size_t curr_len = std::strlen(drv->resp_buf);
+        if (curr_len + len + 2 < drv->resp_max_len) {
+          std::strcat(drv->resp_buf, line);
+          std::strcat(drv->resp_buf, "\r\n");
+        }
+      }
+    }
+  }
+  hal_mutex_unlock(drv->mutex);
+}
+
+void tpmesh_at_process(tpmesh_at_driver_t drv) {
+  if (!drv || !drv->running || !drv->serial)
+    return;
+
+  /* 尝试读取数据 (10ms 超时) */
+  uint8_t buf[64];
+  int ret = hal_serial_read(drv->serial, buf, sizeof(buf), 10);
+  if (ret > 0) {
+    debug_serial("RX", buf, ret);
+
+    for (int i = 0; i < ret; i++) {
+      char c = (char)buf[i];
+      if (drv->line_idx < AT_BUFFER_SIZE - 1) {
+        drv->line_buf[drv->line_idx++] = c;
+      }
+
+      /* 遇到换行符，处理一行 */
+      if (c == '\n') {
+        drv->line_buf[drv->line_idx] = '\0';
+        process_line(drv, drv->line_buf);
+        drv->line_idx = 0;
+      }
+    }
+  }
+}
+
 int tpmesh_at_send_cmd(tpmesh_at_driver_t drv, const char *cmd,
                        uint32_t timeout_ms) {
   char response[128];
@@ -258,51 +370,63 @@ int tpmesh_at_send_cmd_resp(tpmesh_at_driver_t drv, const char *cmd,
   if (!drv || !drv->serial || !cmd)
     return XSLOT_ERR_PARAM;
 
+  /* 保护命令发送过程 */
+  hal_mutex_lock(drv->mutex);
+
+  /* 准备状态 */
+  drv->awaiting_response = true;
+  drv->resp_buf = response;
+  drv->resp_max_len = resp_size;
+  if (response && resp_size > 0) {
+    response[0] = '\0';
+  }
+  drv->cmd_complete = false;
+  drv->cmd_result = XSLOT_ERR_TIMEOUT;
+
   /* 构建完整命令 */
   char full_cmd[256];
   int len = std::snprintf(full_cmd, sizeof(full_cmd), "AT%s\r\n", cmd);
-  if (len < 0 || len >= (int)sizeof(full_cmd))
+  if (len < 0 || len >= (int)sizeof(full_cmd)) {
+    drv->awaiting_response = false;
+    hal_mutex_unlock(drv->mutex);
     return XSLOT_ERR_PARAM;
+  }
 
   /* 打印发送数据 */
   debug_serial("TX", full_cmd, len);
 
   /* 发送命令 */
   if (hal_serial_write(drv->serial, (uint8_t *)full_cmd, len) != len) {
+    drv->awaiting_response = false;
+    hal_mutex_unlock(drv->mutex);
     return XSLOT_ERR_SEND_FAIL;
   }
 
-  /* 等待响应 */
+  hal_mutex_unlock(drv->mutex);
+
+  /* 等待响应 (由 rx_thread 或外部 process 处理) */
   uint32_t start = hal_get_timestamp_ms();
-  drv->rx_len = 0;
-
   while (hal_get_timestamp_ms() - start < timeout_ms) {
-    uint8_t buf[32];
-    int ret = hal_serial_read(drv->serial, buf, sizeof(buf), 10);
-    if (ret > 0) {
-      debug_serial("RX", buf, ret);
-
-      for (int i = 0; i < ret; i++) {
-        if (drv->rx_len < AT_BUFFER_SIZE - 1) {
-          drv->rx_buffer[drv->rx_len++] = buf[i];
-          drv->rx_buffer[drv->rx_len] = '\0';
-        }
-      }
-
-      /* 检查是否收到完整响应 */
-      if (std::strstr(drv->rx_buffer, "OK\r\n")) {
-        if (response && resp_size > 0) {
-          std::strncpy(response, drv->rx_buffer, resp_size - 1);
-          response[resp_size - 1] = '\0';
-        }
-        return XSLOT_OK;
-      }
-      if (std::strstr(drv->rx_buffer, "ERROR")) {
-        return XSLOT_ERR_PARAM;
-      }
+    /* 如果没有开启线程，我们需要在这里主动调用 process */
+    if (!drv->rx_thread) {
+      tpmesh_at_process(drv);
     }
+
+    if (drv->cmd_complete) {
+      /* 命令完成 */
+      hal_mutex_lock(drv->mutex);
+      drv->awaiting_response = false;
+      hal_mutex_unlock(drv->mutex);
+      return drv->cmd_result;
+    }
+
+    hal_sleep_ms(5); /* 短暂休眠 */
   }
 
+  /* 超时 */
+  hal_mutex_lock(drv->mutex);
+  drv->awaiting_response = false;
+  hal_mutex_unlock(drv->mutex);
   return XSLOT_ERR_TIMEOUT;
 }
 

@@ -120,4 +120,32 @@ void hal_mutex_unlock(void *mutex) {
   (void)mutex;
 }
 
+/* ============================================================================
+ * 线程函数
+ * ============================================================================
+ */
+
+void *hal_thread_create(const char *name, hal_thread_func_t func, void *arg,
+                        uint32_t stack_size, int priority) {
+  /* TODO: 实现 */
+  /*
+  TaskHandle_t handle;
+  if (xTaskCreate((TaskFunction_t)func, name, stack_size / 4, arg, priority,
+  &handle) == pdPASS) { return handle;
+  }
+  */
+  (void)name;
+  (void)func;
+  (void)arg;
+  (void)stack_size;
+  (void)priority;
+  return nullptr;
+}
+
+void hal_thread_destroy(void *thread) {
+  /* TODO: 实现 */
+  // if (thread) vTaskDelete((TaskHandle_t)thread);
+  (void)thread;
+}
+
 #endif /* XSLOT_PLATFORM_FREERTOS */
