@@ -2,7 +2,7 @@
 # X-Slot Protocol - CMake 构建配置
 # =============================================================================
 cmake_minimum_required(VERSION 3.15)
-project(xslot VERSION 1.0.0 LANGUAGES C CXX)
+project(xslot VERSION 2.0.0 LANGUAGES C CXX)
 
 # C++ 标准
 set(CMAKE_CXX_STANDARD 20)
@@ -32,16 +32,17 @@ option(XSLOT_BUILD_DEMO "Build demo applications" ON)
 option(XSLOT_BUILD_TEST "Build unit tests" OFF)
 
 # =============================================================================
-# 库目标
+# 库目标 (不包含 HAL 实现，由应用层提供)
 # =============================================================================
 add_library(xslot STATIC
-    # Core
-    src/core/xslot_manager.cpp
+    # Core (Modern C++)
+    src/core/frame.cpp
+    src/core/message_builder.cpp
+    src/core/manager.cpp
     src/core/xslot_protocol.cpp
-    src/core/message_codec.cpp
-    src/core/node_table.cpp
     
     # Transport
+    src/transport/transport.cpp
     src/transport/tpmesh_transport.cpp
     src/transport/tpmesh_at_driver.cpp
     src/transport/direct_transport.cpp
@@ -54,13 +55,6 @@ add_library(xslot STATIC
     # C API
     src/xslot_c_api.cpp
 )
-
-# HAL 层 (平台相关)
-if(XSLOT_PLATFORM STREQUAL "windows")
-    target_sources(xslot PRIVATE src/hal/hal_windows.cpp)
-elseif(XSLOT_PLATFORM STREQUAL "linux")
-    target_sources(xslot PRIVATE src/hal/hal_linux.cpp)
-endif()
 
 # 头文件路径
 target_include_directories(xslot
@@ -84,17 +78,41 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # =============================================================================
-# Demo 应用
+# Demo 应用 (包含平台 HAL 实现)
 # =============================================================================
 if(XSLOT_BUILD_DEMO)
-    add_executable(demo_edge_node demo/demo_edge_node.cpp)
+    # HAL 实现文件 (平台相关)
+    if(XSLOT_PLATFORM STREQUAL "windows")
+        set(HAL_SOURCES demo/hal_windows.c)
+    elseif(XSLOT_PLATFORM STREQUAL "linux")
+        set(HAL_SOURCES demo/hal_linux.c)
+    else()
+        set(HAL_SOURCES "")
+    endif()
+
+    # Edge Node Demo
+    add_executable(demo_edge_node 
+        demo/demo_edge_node.cpp
+        ${HAL_SOURCES}
+    )
     target_link_libraries(demo_edge_node PRIVATE xslot)
+    target_include_directories(demo_edge_node PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     
-    add_executable(demo_hub_node demo/demo_hub_node.cpp)
+    # Hub Node Demo
+    add_executable(demo_hub_node 
+        demo/demo_hub_node.cpp
+        ${HAL_SOURCES}
+    )
     target_link_libraries(demo_hub_node PRIVATE xslot)
+    target_include_directories(demo_hub_node PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     
-    add_executable(demo_hmi demo/demo_hmi.cpp)
+    # HMI Demo
+    add_executable(demo_hmi 
+        demo/demo_hmi.cpp
+        ${HAL_SOURCES}
+    )
     target_link_libraries(demo_hmi PRIVATE xslot)
+    target_include_directories(demo_hmi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 endif()
 
 # =============================================================================
