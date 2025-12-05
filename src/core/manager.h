@@ -177,7 +177,7 @@ private:
   // 内部方法
   void handle_frame(const Frame &frame);
   void on_frame_received(std::span<const uint8_t> data);
-  CTransportAdapter detect_and_create_transport();
+  std::unique_ptr<ITransport> detect_and_create_transport();
   uint8_t next_seq() noexcept { return seq_++; }
 
   // 配置
@@ -188,7 +188,7 @@ private:
 
   // 组件
   DefaultNodeTable node_table_;
-  CTransportAdapter transport_{nullptr};
+  std::unique_ptr<ITransport> transport_;
 
   // C++ 回调
   DataReceivedCallback data_cb_;

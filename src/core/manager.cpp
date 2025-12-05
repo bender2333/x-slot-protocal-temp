@@ -3,7 +3,6 @@
  * @brief X-Slot 协议栈管理器实现
  */
 #include "manager.h"
-#include "../transport/i_transport.h"
 #include <cstring>
 #include <xslot/xslot_error.h>
 
@@ -36,23 +35,19 @@ VoidResult Manager::start() {
 
   // 检测并创建传输层
   transport_ = detect_and_create_transport();
-  if (!transport_.get()) {
+  if (!transport_) {
     mode_ = RunMode::None;
     return VoidResult::error(Error::NoDevice);
   }
 
   // 设置接收回调
-  transport_.set_receive_callback(
-      [](void *ctx, const uint8_t *data, uint16_t len) {
-        auto *self = static_cast<Manager *>(ctx);
-        self->on_frame_received({data, len});
-      },
-      this);
+  transport_->set_receive_callback(
+      [this](std::span<const uint8_t> data) { on_frame_received(data); });
 
   // 启动传输层
-  auto result = transport_.start();
+  auto result = transport_->start();
   if (!result) {
-    transport_ = CTransportAdapter(nullptr);
+    transport_.reset();
     mode_ = RunMode::None;
     return result;
   }
@@ -67,8 +62,10 @@ void Manager::stop() {
   }
 
   running_ = false;
-  transport_.stop();
-  transport_ = CTransportAdapter(nullptr);
+  if (transport_) {
+    transport_->stop();
+    transport_.reset();
+  }
 }
 
 // ============================================================================
@@ -76,7 +73,7 @@ void Manager::stop() {
 // ============================================================================
 
 VoidResult Manager::send_frame(const Frame &frame) {
-  if (!running_ || !transport_.get()) {
+  if (!running_ || !transport_) {
     return VoidResult::error(Error::NotInitialized);
   }
 
@@ -86,7 +83,7 @@ VoidResult Manager::send_frame(const Frame &frame) {
     return VoidResult::error(encode_result.error());
   }
 
-  return transport_.send({buffer, encode_result.value()});
+  return transport_->send({buffer, encode_result.value()});
 }
 
 VoidResult Manager::report(std::span<const xslot_bacnet_object_t> objects) {
@@ -159,8 +156,8 @@ VoidResult Manager::update_config(uint8_t cell_id, int8_t power_dbm) {
   config_.cell_id = cell_id;
   config_.power_dbm = power_dbm;
 
-  if (transport_.get() && mode_ == RunMode::Wireless) {
-    return transport_.configure(cell_id, power_dbm);
+  if (transport_ && mode_ == RunMode::Wireless) {
+    return transport_->configure(cell_id, power_dbm);
   }
 
   return VoidResult::ok();
@@ -263,30 +260,24 @@ void Manager::handle_frame(const Frame &frame) {
   }
 }
 
-CTransportAdapter Manager::detect_and_create_transport() {
-  // 尝试创建 TPMesh 传输层
-  i_transport_t *transport = tpmesh_transport_create(&config_);
-  if (transport) {
-    if (transport_probe(transport) == XSLOT_OK) {
-      mode_ = RunMode::Wireless;
-      return CTransportAdapter(transport);
-    }
-    transport_destroy(transport);
+std::unique_ptr<ITransport> Manager::detect_and_create_transport() {
+  // 尝试 TPMesh 传输层
+  auto tpmesh = create_tpmesh_transport(config_);
+  if (tpmesh && tpmesh->probe()) {
+    mode_ = RunMode::Wireless;
+    return tpmesh;
   }
 
-  // 尝试创建 Direct 传输层
-  transport = direct_transport_create(&config_);
-  if (transport) {
-    if (transport_probe(transport) == XSLOT_OK) {
-      mode_ = RunMode::Hmi;
-      return CTransportAdapter(transport);
-    }
-    transport_destroy(transport);
+  // 尝试 Direct 传输层
+  auto direct = create_direct_transport(config_);
+  if (direct && direct->probe()) {
+    mode_ = RunMode::Hmi;
+    return direct;
   }
 
   // 创建 Null 传输层
   mode_ = RunMode::None;
-  return CTransportAdapter(null_transport_create());
+  return create_null_transport();
 }
 
 } // namespace xslot

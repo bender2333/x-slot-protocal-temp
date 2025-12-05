@@ -42,7 +42,6 @@ add_library(xslot STATIC
     src/core/xslot_protocol.cpp
     
     # Transport
-    src/transport/transport.cpp
     src/transport/tpmesh_transport.cpp
     src/transport/tpmesh_at_driver.cpp
     src/transport/direct_transport.cpp

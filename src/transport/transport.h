@@ -1,6 +1,6 @@
 /**
  * @file transport.h
- * @brief X-Slot 传输层抽象接口 (C++20)
+ * @brief X-Slot 传输层抽象接口 (Modern C++)
  *
  * 定义传输层的抽象基类，支持多种传输方式。
  */
@@ -10,20 +10,17 @@
 #include "../core/function_ref.h"
 #include "../core/result.h"
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <span>
 #include <xslot/xslot_types.h>
-
-// 前向声明 C 传输层类型 (全局命名空间)
-struct i_transport;
-typedef struct i_transport i_transport_t;
 
 namespace xslot {
 
 /**
  * @brief 传输层接收回调类型
  */
-using TransportReceiveCallback = function_ref<void(std::span<const uint8_t>)>;
+using TransportReceiveCallback = std::function<void(std::span<const uint8_t>)>;
 
 /**
  * @brief 传输层抽象基类
@@ -78,10 +75,8 @@ public:
   /**
    * @brief 设置接收回调
    * @param callback 回调函数，数据到达时调用
-   * @param ctx 用户上下文指针
    */
-  virtual void set_receive_callback(TransportReceiveCallback callback,
-                                    void *ctx) = 0;
+  virtual void set_receive_callback(TransportReceiveCallback callback) = 0;
 
   /**
    * @brief 检查是否正在运行
@@ -92,78 +87,32 @@ protected:
   ITransport() = default;
 };
 
-/**
- * @brief 传输层工厂接口
+/* ============================================================================
+ * 工厂函数
+ * ============================================================================
  */
-class ITransportFactory {
-public:
-  virtual ~ITransportFactory() = default;
-
-  /**
-   * @brief 创建 TPMesh 传输层
-   */
-  [[nodiscard]] virtual std::unique_ptr<ITransport>
-  create_tpmesh(const xslot_config_t &config) = 0;
-
-  /**
-   * @brief 创建 Direct 传输层
-   */
-  [[nodiscard]] virtual std::unique_ptr<ITransport>
-  create_direct(const xslot_config_t &config) = 0;
-
-  /**
-   * @brief 创建 Null 传输层
-   */
-  [[nodiscard]] virtual std::unique_ptr<ITransport> create_null() = 0;
-};
 
 /**
- * @brief C 风格传输层适配器
- *
- * 将新的 C++ ITransport 接口适配到旧的 C 风格接口。
+ * @brief 创建 TPMesh 传输层
+ * @param config 配置参数
+ * @return 传输层实例，失败返回 nullptr
  */
-class CTransportAdapter {
-public:
-  /**
-   * @brief 从 C 传输层句柄创建适配器
-   */
-  explicit CTransportAdapter(i_transport_t *c_transport) noexcept;
+[[nodiscard]] std::unique_ptr<ITransport>
+create_tpmesh_transport(const xslot_config_t &config);
 
-  ~CTransportAdapter();
+/**
+ * @brief 创建 Direct 传输层 (HMI 直连)
+ * @param config 配置参数
+ * @return 传输层实例，失败返回 nullptr
+ */
+[[nodiscard]] std::unique_ptr<ITransport>
+create_direct_transport(const xslot_config_t &config);
 
-  // 禁用拷贝
-  CTransportAdapter(const CTransportAdapter &) = delete;
-  CTransportAdapter &operator=(const CTransportAdapter &) = delete;
-
-  // 允许移动
-  CTransportAdapter(CTransportAdapter &&other) noexcept;
-  CTransportAdapter &operator=(CTransportAdapter &&other) noexcept;
-
-  [[nodiscard]] VoidResult start();
-  void stop();
-  [[nodiscard]] VoidResult send(std::span<const uint8_t> data);
-  [[nodiscard]] VoidResult probe();
-  [[nodiscard]] VoidResult configure(uint8_t cell_id, int8_t power_dbm);
-
-  /**
-   * @brief 设置接收回调 (C 风格)
-   */
-  void set_receive_callback(void (*callback)(void *, const uint8_t *, uint16_t),
-                            void *ctx);
-
-  /**
-   * @brief 获取底层 C 传输层句柄
-   */
-  [[nodiscard]] i_transport_t *get() const noexcept { return transport_; }
-
-  /**
-   * @brief 释放所有权
-   */
-  [[nodiscard]] i_transport_t *release() noexcept;
-
-private:
-  i_transport_t *transport_;
-};
+/**
+ * @brief 创建 Null 传输层 (空实现)
+ * @return 传输层实例
+ */
+[[nodiscard]] std::unique_ptr<ITransport> create_null_transport();
 
 } // namespace xslot
 
