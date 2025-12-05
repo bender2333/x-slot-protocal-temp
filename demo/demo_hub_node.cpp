@@ -49,13 +49,14 @@ void on_report_received(uint16_t from, const xslot_bacnet_object_t *objects,
     }
 
     if (obj->object_type <= XSLOT_OBJ_ANALOG_VALUE) {
-      printf("  %s%d = %.2f\n", type_name, obj->object_id,
+      printf("  %s%d = %.2f ", type_name, obj->object_id,
              obj->present_value.analog);
     } else {
-      printf("  %s%d = %d\n", type_name, obj->object_id,
+      printf("  %s%d = %d ", type_name, obj->object_id,
              obj->present_value.binary);
     }
   }
+  printf("\n");
 }
 
 /**

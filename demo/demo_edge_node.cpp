@@ -89,6 +89,8 @@ int main(int argc, char *argv[]) {
   /* 命令行参数: 串口 */
   if (argc > 1) {
     snprintf(config.uart_port, sizeof(config.uart_port), "%s", argv[1]);
+    char *ptr;
+    config.local_addr = strtoul(argv[2], &ptr, 16);
   } else {
 #ifdef _WIN32
     snprintf(config.uart_port, sizeof(config.uart_port), "COM23");
@@ -98,6 +100,7 @@ int main(int argc, char *argv[]) {
   }
 
   printf("Using port: %s\n", config.uart_port);
+  printf("Using addr: %X \n", config.local_addr);
 
   /* 初始化 */
   xslot_handle_t handle = xslot_init(&config);
@@ -159,7 +162,7 @@ int main(int argc, char *argv[]) {
     ret = xslot_report_objects(handle, objects, obj_count);
     if (ret == XSLOT_OK) {
       report_count++;
-      printf("[%d] Reported %d objects: AI=%.1f,%.1f,%.1f,%.1f "
+      printf("[%d] Reported %d objects: AI=%.2f,%.2f,%.2f,%.2f "
              "DI=%d,%d,%d,%d\n",
              report_count, obj_count, ai_objects[0].uidata.value,
              ai_objects[1].uidata.value, ai_objects[2].uidata.value,
